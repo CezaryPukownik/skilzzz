@@ -14,8 +14,23 @@ class Session(ABC):
         self.storer = storer
 
     def start(self, context: Hashable) -> None:
-        for output in self.generate_outputs(driver=self.driver, context=context):
-            self.storer.store(output=output)
+        try:
+            for output in self.generate_outputs(driver=self.driver, context=context):
+                self.storer.store(output=output)
+
+                self.storer._on_output_stored(context)
+                self.driver._on_output_stored(context)
+
+        except Exception as e:
+            self.storer._on_session_fail(context)
+            self.driver._on_session_fail(context)
+            raise e
+            
+        finally:
+            self.storer._on_session_end(context)
+            self.driver._on_session_end(context)
+
+
 
     @abstractmethod
     def generate_outputs(self, driver, context) -> Generator[Output, None, None]:

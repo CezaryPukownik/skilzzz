@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 import os
 from pathlib import Path
 
-from scraper.output import Output, FileOutput
+from scraper.output import DictOutput, Output, FileOutput
 from scraper.partitioner import Partitioner
 
 import boto3
@@ -11,6 +11,15 @@ class Storer(ABC):
 
     @abstractmethod
     def store(self, output: Output):
+        ...
+
+    def _on_session_end(self, context):
+        ...
+
+    def _on_session_fail(self, context):
+        ...
+
+    def _on_output_stored(self, context):
         ...
 
     
@@ -36,6 +45,8 @@ class PartialFileSystemStorer(Storer):
     def store(self, output: Output):
         self.file_handle.write(output.content)
 
+    def _on_session_end(self, context):
+        self.file_handle.close()
 
 class PartitionedFileSystemStorer(FileSystemStorer):
 
@@ -52,9 +63,59 @@ class PartitionedFileSystemStorer(FileSystemStorer):
 
 class S3FileStorer(Storer):
     
-    def __init__(self) -> None:
+    def __init__(self, bucket: str, prefix: Path) -> None:
         self.s3 = boto3.client("s3")
+        self.bucket = bucket
+        self.prefix = prefix
         super().__init__()
 
     def store(self, output: FileOutput):
-        self.s3.upload_file()
+        self.s3.put_object(
+            Body=str.encode(output.content), 
+            Bucket=self.bucket, 
+            Key=self.prefix/output.filename
+        )
+
+class PartitionedS3FileStorer(Storer):
+    
+    def __init__(self, bucket: str, prefix: Path, partitioner: Partitioner) -> None:
+        self.s3 = boto3.client("s3")
+        self.partitioner = partitioner
+        self.bucket = bucket
+        self.prefix = prefix
+        super().__init__()
+
+    def store(self, output: FileOutput):
+        partition: Path = self.partitioner.get_partition()
+        output_key: Path = self.prefix / partition / output.filename
+        output_key: str = str(output_key)
+        self.s3.put_object(
+            Body=str.encode(output.content), 
+            Bucket=self.bucket, 
+            Key=output_key
+        )
+import tempfile
+import json
+class CompactedPartitionedS3DictStorer(Storer):
+    
+    def __init__(self, bucket: str, prefix: Path, key: Path, partitioner: Partitioner) -> None:
+        self.s3 = boto3.client("s3")
+        self.partitioner = partitioner
+        self.bucket = bucket
+        self.key = key
+        self.prefix = prefix
+        self.tempfile = tempfile.NamedTemporaryFile()
+        super().__init__()
+
+    def store(self, output: DictOutput):
+        json_str = json.dumps(output.content, default=str) + "\n"
+        self.tempfile.write(str.encode(json_str))
+
+    def _on_session_end(self, context):
+        partition: Path = self.partitioner.get_partition()
+        output_key: Path = self.prefix / partition / self.key
+        output_key: str = str(output_key)
+        self.s3.upload_file(self.tempfile.name, self.bucket, output_key)
+        self.tempfile.close()
+        return super()._on_session_end(context)
+        

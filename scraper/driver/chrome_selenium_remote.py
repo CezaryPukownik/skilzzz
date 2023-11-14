@@ -36,3 +36,5 @@ class ChromeSeleniumRemoteDriver(Driver):
         self.webdriver.get(url)
         return self.webdriver.page_source
 
+    def _on_session_end(self, context):
+        self.webdriver.quit()

@@ -8,6 +8,11 @@ class Output:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 @dataclass
+class DictOutput:
+    content: dict
+    metadata: dict = field(default_factory=dict)
+
+@dataclass
 class FileOutput:
     content: Any
     filename: Path
