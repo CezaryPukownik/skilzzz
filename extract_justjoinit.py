@@ -4,6 +4,7 @@ import time
 import json
 import logging
 from datetime import datetime
+from typing import Optional
 
 import boto3
 from bs4 import BeautifulSoup
@@ -11,8 +12,7 @@ from tqdm import tqdm
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 
-
-
+# LOGGER
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 console_handler = logging.StreamHandler()
@@ -20,10 +20,18 @@ formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
 console_handler.setFormatter(formatter)
 logger.addHandler(console_handler)
 
+def get_envvar(envvar: str) -> Optional[str]:
+    try:
+        return os.environ[envvar]
+    except KeyError:
+        logger.warning(f"Environment Variable '{envvar}' is not set. Using default value.")
+        
+
 # SETTINGS
 DATA_ROOT = "/tmp/skilzzz/justjoinit"
 S3_ROOT = "justjoinit"
 S3_BUCKET = "stxnext-sandbox-cp"
+SELENIUM_ADDRESS = get_envvar("SELENIUM_ADDRESS") or "127.0.0.1:4444"
 # ########
 
 def scrape_justjoinit_offer_list(url: str, scroll_interval: float = 0.2, init_sleep: int = 3, scroll_by: int = 800):
@@ -33,9 +41,37 @@ def scrape_justjoinit_offer_list(url: str, scroll_interval: float = 0.2, init_sl
     logger.info(f"Scraping parameters: scroll_interval: {scroll_interval}, scroll_by: {scroll_by}, init_sleep: {init_sleep}")
     
     logger.info("Launching Headless Browser...")
-    options = Options()
-    options.add_argument('--headless=new')
-    driver = webdriver.Chrome(options=options)
+
+   
+    # Connect to remote selenum driver 
+    options = webdriver.ChromeOptions()
+    options.add_argument('--ignore-ssl-errors=yes')
+    options.add_argument('--ignore-certificate-errors')
+
+    RETRIES = 60
+    for i in range(RETRIES):
+        try:
+            driver = webdriver.Remote(
+                command_executor=f'http://{SELENIUM_ADDRESS}/wd/hub',
+                options=options
+            )
+            logger.info("Established connection with remote selenium webdriver")
+            break
+        except:
+            logger.warning("Unable to connecto to remote driver, retring in 1 second.")
+            time.sleep(1)
+            pass
+    else:
+        sys.exit(1)
+        
+
+    # # Create local driver 
+    # options = Options()
+    # options.add_argument('--headless=new')
+    # options.add_argument('--disable-gpu')
+    # options.add_argument('--no-sandbox-')
+    # options.add_argument('--disable-dev-shm-usage')
+    # driver = webdriver.Chrome(options=options)
 
     logger.info(f"Openning url {url}...")
     driver.get(url)
@@ -140,7 +176,7 @@ def extract_justjoinit():
         for i, html in enumerate(scrape_justjoinit_offer_list(url)):
 
             # Save HTML file.
-            html_name = f"justjoinit-{session_timestamp}-{i}.html"
+            html_name = f"justjoinit-{session_timestamp}-{i:04}.html"
             local_html_path = f"{local_html_folder}/{html_name}"
             with open(local_html_path, "w") as f_html:
                 f_html.write(html)

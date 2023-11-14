@@ -13,3 +13,10 @@ Start splash:
 $ sudo docker pull scrapinghub/splash
 $ sudo docker run -it -p 8050:8050 --rm scrapinghub/splash --disable-private-mode
 ```
+
+
+Use selenium standalone application
+https://www.browserstack.com/guide/run-selenium-tests-in-docker
+
+docker pull selenium/standalone-chrome
+docker run -d -p 4444:4444 -v /dev/shm:/dev/shm selenium/standalone-chrome
