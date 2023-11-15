@@ -1,0 +1,34 @@
+name: Deploy to ECR
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  build-and-push-justjoinit-scraper:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: docker://ghcr.io/kciter/aws-ecr-action:latest
+      with:
+        access_key_id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        secret_access_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        account_id: ${{ secrets.AWS_ACCOUNT_ID }}
+        repo: 393861902470.dkr.ecr.eu-central-1.amazonaws.com/skilzzz-justjoinit-scraper
+        region: eu-central-1
+        tags: latest,${{ github.sha }}
+        dockerfile: Dockerfile.justjoinit-scraper
+
+  build-and-push-justjoinit-parser:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: docker://ghcr.io/kciter/aws-ecr-action:latest
+      with:
+        access_key_id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        secret_access_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        account_id: ${{ secrets.AWS_ACCOUNT_ID }}
+        repo: 393861902470.dkr.ecr.eu-central-1.amazonaws.com/skilzzz-justjoinit-parser
+        region: eu-central-1
+        tags: latest,${{ github.sha }}
+        dockerfile: Dockerfile.justjoinit-parser

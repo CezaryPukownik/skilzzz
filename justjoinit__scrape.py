@@ -160,6 +160,6 @@ if __name__ == "__main__":
     
     send_success(
         task_token=os.environ['TASK_TOKEN'],
-        output=json.dumps({"output_prefix": session_output_prefix})
+        output=json.dumps({"output_prefix": session_output_prefix}, default=str)
     )
 
