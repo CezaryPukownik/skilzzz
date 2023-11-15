@@ -1,9 +1,9 @@
 FROM python:3.10
 
 ADD scraper scraper 
-ADD justjoinit__scrape.py .
+ADD justjoinit__parse_html.py .
 ADD requirements.txt .
 
 RUN pip install -r requirements.txt
 
-CMD ["python", "justjoinit__scrape.py"]
+CMD python justjoinit__parse_html.py --prefix $PREFIX

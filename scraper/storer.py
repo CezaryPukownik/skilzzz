@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 import os
 from pathlib import Path
+from scraper.logger import logger
 
 from scraper.output import DictOutput, Output, FileOutput
 from scraper.partitioner import Partitioner
@@ -94,6 +95,8 @@ class PartitionedS3FileStorer(Storer):
             Bucket=self.bucket, 
             Key=output_key
         )
+        logger.info(f"Stored FileOutput at s3://{self.bucket}/{output_key}.")
+
 import tempfile
 import json
 class CompactedPartitionedS3DictStorer(Storer):
@@ -110,6 +113,7 @@ class CompactedPartitionedS3DictStorer(Storer):
     def store(self, output: DictOutput):
         json_str = json.dumps(output.content, default=str) + "\n"
         self.tempfile.write(str.encode(json_str))
+        logger.info(f"Stored DictOutput is temporary file {self.tempfile.name}.")
 
     def _on_session_end(self, context):
         partition: Path = self.partitioner.get_partition()
@@ -117,5 +121,6 @@ class CompactedPartitionedS3DictStorer(Storer):
         output_key: str = str(output_key)
         self.s3.upload_file(self.tempfile.name, self.bucket, output_key)
         self.tempfile.close()
+        logger.info(f"Stored compacted file at s3://{self.bucket}/{output_key}.")
         return super()._on_session_end(context)
         

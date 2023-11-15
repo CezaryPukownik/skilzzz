@@ -48,12 +48,15 @@ listing = df.select(
     f.col('title'),
     f.col('company'),
     f.col('city'),
+    f.col('experience'),
     f.col('operating_mode'),
     f.col('type_of_work'),
     f.col('skills'),
     f.col('salary_types'),
     cast_listed_at(f.col('listed_at')).alias('listed_at')
-)
+).filter('experience="Senior"').filter(f.col('title').contains('Data Engineer'))
+
+#%%
 
 skills_listing = ( 
     listing

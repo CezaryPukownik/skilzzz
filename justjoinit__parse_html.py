@@ -1,4 +1,5 @@
 #%%
+import click
 from dataclasses import dataclass
 from datetime import datetime
 from threading import Thread
@@ -8,8 +9,9 @@ from scraper.driver.s3 import S3Driver
 from scraper.output import Output, DictOutput
 from scraper.partitioner import YMDPartitioner
 from scraper.session import Session
-from scraper.settings import S3_BUCKET
+from scraper.settings import S3_BUCKET, TIMESTAMP_FORMAT, JUSTJOINIT_JSONL_OFFERS_PATH 
 from scraper.storer import CompactedPartitionedS3DictStorer
+from scraper.logger import logger
 from tqdm import tqdm
 
 from bs4 import BeautifulSoup
@@ -20,26 +22,42 @@ class JustjoinitJsonlSession(Session):
     def generate_outputs(self, driver, context) -> Generator[Output, None, None]:
         files = driver.list_prefix(prefix=context.prefix)
 
+        # Multithreaded execution
         futures = []
         with ThreadPoolExecutor() as executor:
             for file in files:
                 futures.append(executor.submit(self.generate_output, driver, file))
 
-            for future in tqdm(as_completed(futures), total=len(files)):
-                yield future.result()
+            for future in as_completed(futures):
+                try:
+                    yield future.result()
+                except ValueError as e:
+                    logger.error(f"Cannot parse file {file}. {e}")
+                    
+
+        # Linear execution
+        # for file in files
+        #     try:
+        #         yield self.generate_output(driver, file)
+        #     except ValueError:
+        #         logger.error(f"Cannot parse file {file}. Skipping...")
             
 
     def generate_output(self, driver, file) -> DictOutput:
         s3_object = driver.get(file)
         html = s3_object.decode('utf-8')
+        logger.info(f"Loaded {file} from {driver.__class__.__name__}")
+
         html_data = self.parse_offer(html)
         key_data = self.parse_key(file)
+        logger.info(f"File {file} parsed correctly")
+
         return DictOutput(
             content={**key_data, **html_data}
         )
         
     def parse_key(self, key):
-        data_from_key = re.findall("ts=([0-9]{12,14})/([0-9]{5})-(.*)\.html", key)
+        data_from_key = re.findall("ts=([0-9]{14})/([0-9]{5})-(.*)\.html", key)
         if data_from_key:
             crawled_at, offer_index, offer_id = data_from_key[0]
 
@@ -56,8 +74,11 @@ class JustjoinitJsonlSession(Session):
         job_offer = {}
 
         # Title
-        job_title = soup.select_one('h1').text
-        job_offer['title'] = job_title
+        job_title = soup.select_one('h1')
+        if job_title == None:
+            raise ValueError("Invalid HTML offer. Title cannot be found.")
+
+        job_offer['title'] = job_title.text
 
         # Company
         job_company = soup.select_one('svg[data-testid="ApartmentRoundedIcon"]').parent.text
@@ -72,9 +93,16 @@ class JustjoinitJsonlSession(Session):
         job_offer['city'] = job_location
 
         # Skills
-        skills_h6s = soup.select_one('h6').next_sibling.find_all('h6')
+        sections = soup.select_one('h1').parent.parent.parent.parent.find_all('div', recursive=False)
+        skills_section = None
+        for section in sections:
+            has_h6 = section.select_one('h6')
+            if has_h6 and has_h6.text.lower() == 'tech stack':
+                skills_section = section
+                break
+
         job_skills = []
-        for skill_h6 in skills_h6s:
+        for skill_h6 in skills_section.select_one('ul').find_all('h6'):
             skill_name = skill_h6.text
             skill_div = skill_h6.parent
             skill_seniorty = skill_div.select_one('span').text
@@ -94,7 +122,13 @@ class JustjoinitJsonlSession(Session):
             salary_divs = salary_section.select_one('div div').find_all('div', recursive=False)
             for salary_div in salary_divs:
                 salary_span = salary_div.select_one('span')
-                job_salary_from, job_salary_to = [span.text for span in salary_span.find_all('span')]
+                
+                salaries = [span.text for span in salary_span.find_all('span')]
+                match len(salaries):
+                    case 1: job_salary_from = job_salary_to = salaries[0]
+                    case 2: job_salary_from, job_salary_to = salaries 
+                    case _: logger.warning("Didn't parse salaries! Investigate whats wrong.")
+
                 salary_type = salary_span.next_sibling.text
                 salary_currency = salary_span.find(string=re.compile('[A-Z]{3}'))
                 salary_types.append({
@@ -124,18 +158,18 @@ class JustjoinitJsonlSession(Session):
 
 @dataclass(frozen=True)
 class JustjoinitJsonlContext:
+    """Prefix that will point to HTML Scraping Session."""
     prefix: str
 
-if __name__ == "__main__":
+@click.command()
+@click.option("--prefix")
+def main(prefix):
+    # prefix = "sources/justjoinit/offers/html/year=2023/month=11/day=14/ts=20231114185903/"
+    if not (matches := re.findall("ts=([0-9]{14})", prefix)):
+        raise ValueError("Provided prefix is not valid. Missing `ts` partition.")
 
-    current_timestamp = datetime.now().strftime("%y%m%d%H%M%S")
-
-    JUSTJOINIT_HTML_LISTING_PATH = 'sources/justjoinit/offerlist/html'
-    JUSTJOINIT_HTML_OFFERS_PATH = 'sources/justjoinit/offers/html'
-    JUSTJOINIT_JSONL_OFFERS_PATH = 'sources/justjoinit/offers/jsonl'
-   
-    prefix = "sources/justjoinit/offers/year=2023/month=11/day=14/ts=231114130114"
-    origin_session_id = re.findall("ts=([0-9]{12,14})", prefix)[0]
+    origin_session_ts = matches[0]
+    origin_session_date = datetime.strptime(origin_session_ts, TIMESTAMP_FORMAT).date()
 
     context = JustjoinitJsonlContext(
         prefix=prefix
@@ -144,8 +178,8 @@ if __name__ == "__main__":
     s3_storer = CompactedPartitionedS3DictStorer(
         bucket=S3_BUCKET, 
         prefix=JUSTJOINIT_JSONL_OFFERS_PATH,
-        key=f"{origin_session_id}.jsonl", 
-        partitioner=YMDPartitioner()
+        key=f"justjoinit-offers-{origin_session_ts}.jsonl", 
+        partitioner=YMDPartitioner(base_date=origin_session_date)
     )
 
     session = JustjoinitJsonlSession(
@@ -154,3 +188,6 @@ if __name__ == "__main__":
     )
 
     session.start(context)
+
+if __name__=="__main__":
+    main()

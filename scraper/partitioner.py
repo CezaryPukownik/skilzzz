@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from datetime import date, datetime
 from pathlib import Path
+from typing import Optional, Dict
 
 
 class Partitioner(ABC):
@@ -12,14 +13,22 @@ class Partitioner(ABC):
         
 class YMDPartitioner(Partitioner):
 
-    def __init__(self, before={}, after={}) -> None:
+    def __init__(
+        self, base_date: Optional[date]=None, before: Dict[str, str]={}, after: Dict[str, str]={}
+    ) -> None:
+
+        self.base_date = base_date
         self.before = before
         self.after = after
+
+        if not self.base_date:
+            self.base_date = date.today()
         super().__init__()
 
+
     def get_partition(self) -> Path:
-        current_date = date.today()
-        partition = Path(f"year={current_date.year}/month={current_date.month:02d}/day={current_date.day:02d}/")
+        base_date = self.base_date
+        partition = Path(f"year={base_date.year}/month={base_date.month:02d}/day={base_date.day:02d}/")
 
         for key, value in self.before.items():
             partition = Path(f"{key}={value}") / partition

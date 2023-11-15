@@ -1,9 +1,10 @@
 from dataclasses import dataclass
 from datetime import datetime
+import json
 from pathlib import Path
 import time
 from typing import Generator
-
+import os
 from threading import Thread
 from functools import partialmethod
 
@@ -16,11 +17,15 @@ from scraper.storer import FileSystemStorer, PartitionedFileSystemStorer, Partit
 from scraper.partitioner import YMDPartitioner
 from scraper.driver.chrome_selenium_remote import ChromeSeleniumRemoteDriver
 
+# test
+from scraper.flow import send_success
+
 from scraper.settings import  (
     SELENIUM_ADDRESS, 
     S3_BUCKET,
     JUSTJOINIT_HTML_LISTING_PATH,
     JUSTJOINIT_HTML_OFFERS_PATH,
+    TIMESTAMP_FORMAT,
 )
 
 @dataclass(frozen=True)
@@ -41,7 +46,7 @@ class JustjoinitSession(Session):
 
         threads=[]
         followed_links = []
-        current_timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        current_timestamp = datetime.now().strftime(TIMESTAMP_FORMAT)
 
         logger.info(f"Openning url {url}...")
         driver.get(url)
@@ -131,7 +136,7 @@ class JustjoinitOfferPageSession(Session):
 
 if __name__ == "__main__":
 
-    session_timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    session_timestamp = datetime.now().strftime(TIMESTAMP_FORMAT)
 
     s3_storer = PartitionedS3FileStorer(
         bucket=S3_BUCKET, 
@@ -150,4 +155,11 @@ if __name__ == "__main__":
         url=url, init_sleep=5, scroll_by=100, scroll_interval=0.2
     )
 
+    session_output_prefix = s3_storer.prefix / s3_storer.partitioner.get_partition()
     session.start(context)
+    
+    send_success(
+        task_token=os.environ['TASK_TOKEN'],
+        output=json.dumps({"output_prefix": session_output_prefix})
+    )
+
