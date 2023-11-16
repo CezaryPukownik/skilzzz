@@ -34,6 +34,7 @@ class JustjoinitContext:
     init_sleep: int
     scroll_interval: int
     scroll_by: int
+    session_timestamp: str
 
 class JustjoinitSession(Session):
    
@@ -43,10 +44,10 @@ class JustjoinitSession(Session):
         init_sleep = context.init_sleep
         scroll_interval = context.scroll_interval
         scroll_by = context.scroll_by
+        current_timestamp = context.session_timestamp
 
         threads=[]
         followed_links = []
-        current_timestamp = datetime.now().strftime(TIMESTAMP_FORMAT)
 
         logger.info(f"Openning url {url}...")
         driver.get(url)
@@ -135,31 +136,36 @@ class JustjoinitOfferPageSession(Session):
 
 
 if __name__ == "__main__":
-
-    session_timestamp = datetime.now().strftime(TIMESTAMP_FORMAT)
-
-    s3_storer = PartitionedS3FileStorer(
-        bucket=S3_BUCKET, 
-        prefix=JUSTJOINIT_HTML_LISTING_PATH, 
-        partitioner=YMDPartitioner(after={"ts": session_timestamp})
-    )
-
-    session = JustjoinitSession(
-        driver=ChromeSeleniumRemoteDriver(address=SELENIUM_ADDRESS),
-        storer=s3_storer
-    )
-
     url = "https://justjoin.it/all-locations/data"
 
-    context = JustjoinitContext(
-        url=url, init_sleep=5, scroll_by=100, scroll_interval=0.2
+    session_timestamp = datetime.now().strftime(TIMESTAMP_FORMAT)
+    session = JustjoinitSession(
+        driver=ChromeSeleniumRemoteDriver(address=SELENIUM_ADDRESS),
+        storer=PartitionedS3FileStorer(
+            bucket=S3_BUCKET, 
+            prefix=JUSTJOINIT_HTML_LISTING_PATH, 
+            partitioner=YMDPartitioner(after={"ts": session_timestamp})
+        )
     )
 
-    session_output_prefix = s3_storer.prefix / s3_storer.partitioner.get_partition()
-    session.start(context)
-    
-    send_success(
-        task_token=os.environ['TASK_TOKEN'],
-        output=json.dumps({"output_prefix": session_output_prefix}, default=str)
+    session.start(
+        JustjoinitContext(
+            url=url,
+            init_sleep=5, 
+            scroll_by=100,
+            scroll_interval=0.2,
+            session_timestamp=session_timestamp,
+        )
     )
+    
+    session_listing_output_prefix = JUSTJOINIT_HTML_LISTING_PATH / session.storer.partitioner.get_partition()
+    session_offers_output_prefix = JUSTJOINIT_HTML_OFFERS_PATH / session.storer.partitioner.get_partition()
+    if (task_token := os.environ.get('AWS_STEPFUNCTIONS_TASK_TOKEN', None)):
+        send_success(
+            task_token=task_token,
+            output=json.dumps({
+                "listing_prefix": session_listing_output_prefix,
+                "offers_prefix": session_output_prefix,
+            }, default=str)
+        )
 

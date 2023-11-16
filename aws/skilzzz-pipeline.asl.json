@@ -1,0 +1,84 @@
+{
+  "Comment": "Daily process of skilzzz",
+  "StartAt": "justjoinit-scrape",
+  "States": {
+    "justjoinit-scrape": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::ecs:runTask.waitForTaskToken",
+      "OutputPath": "$",
+      "Parameters": {
+        "LaunchType": "FARGATE",
+        "Cluster": "arn:aws:ecs:eu-central-1:393861902470:cluster/skilzzz-ecs-cluster",
+        "TaskDefinition": "arn:aws:ecs:eu-central-1:393861902470:task-definition/skilzzz-justjoinit-scrape:1",
+        "NetworkConfiguration": {
+          "AwsvpcConfiguration": {
+            "Subnets": [
+              "subnet-0e49b5e1127d772be",
+              "subnet-07c6dc719440c4f55",
+              "subnet-08ad4fa05471b1a07"
+            ],
+            "SecurityGroups": [
+              "sg-0feb285b46ebc7850"
+            ],
+            "AssignPublicIp": "ENABLED"
+          }
+        },
+        "Overrides": {
+          "ContainerOverrides": [
+            {
+              "Name": "justjoinit-scraper",
+              "Environment": [
+                {
+                  "Name": "AWS_STEPFUNCTIONS_TASK_TOKEN",
+                  "Value.$": "$$.Task.Token"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "Next": "justjoinit-parse"
+    },
+    "justjoinit-parse": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::ecs:runTask.waitForTaskToken",
+      "OutputPath": "$",
+      "Parameters": {
+        "LaunchType": "FARGATE",
+        "Cluster": "arn:aws:ecs:eu-central-1:393861902470:cluster/skilzzz-ecs-cluster",
+        "TaskDefinition": "arn:aws:ecs:eu-central-1:393861902470:task-definition/skilzzz-justjoinit-parse:1",
+        "NetworkConfiguration": {
+          "AwsvpcConfiguration": {
+            "Subnets": [
+              "subnet-0e49b5e1127d772be",
+              "subnet-07c6dc719440c4f55",
+              "subnet-08ad4fa05471b1a07"
+            ],
+            "SecurityGroups": [
+              "sg-0feb285b46ebc7850"
+            ],
+            "AssignPublicIp": "ENABLED"
+          }
+        },
+        "Overrides": {
+          "ContainerOverrides": [
+            {
+              "Name": "parser",
+              "Environment": [
+                {
+                  "Name": "PREFIX",
+                  "Value.$": "$.offers_prefix"
+                },
+                {
+                  "Name": "AWS_STEPFUNCTIONS_TASK_TOKEN",
+                  "Value.$": "$$.Task.Token"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "End": true
+    }
+  }
+}

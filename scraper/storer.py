@@ -118,8 +118,7 @@ class CompactedPartitionedS3DictStorer(Storer):
     def _on_session_end(self, context):
         partition: Path = self.partitioner.get_partition()
         output_key: Path = self.prefix / partition / self.key
-        output_key: str = str(output_key)
-        self.s3.upload_file(self.tempfile.name, self.bucket, output_key)
+        self.s3.upload_file(self.tempfile.name, self.bucket, str(output_key))
         self.tempfile.close()
         logger.info(f"Stored compacted file at s3://{self.bucket}/{output_key}.")
         return super()._on_session_end(context)

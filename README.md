@@ -2,6 +2,57 @@
 
 skilzzz is a AWS Demo project that focuses on gathering data about job offers from many sources, mostly in Poland to track value and demand of Data skills.
 
+
+## Description
+
+scraper-parser relation.
+1. scraper need to has `AWS_STEPFUNCTIONS_TASK_TOKEN` env var declared when image is ran. 
+This envvar needs to be set in stepfunctions definition of ECS:run task like thatL
+
+```
+"Overrides": {
+    "ContainerOverrides": [{
+        "Name": "justjoinit-scraper",
+        "Environment": [{
+            "Name": "AWS_STEPFUNCTIONS_TASK_TOKEN",
+            "Value.$": "$$.Task.Token"
+        }]
+    }]
+}
+```
+
+This is needed so that scraper application can send `send_success` message to step function
+when its done. With `output` set to the path that was just created by scraper. Output needs to 
+be a valid json-string.
+
+```
+send_success(
+    token=os.environ['AWS_STEPFUNCTIONS_TASK_TOKEN'],
+    output=json.dumps(
+        {'output_prefix': session_prefix: str}, default=str
+    )
+)
+```
+
+2. parser need to has `PREFIX` env var declared, to know with folder (prefix) of aws
+to parse. For now (as of 2023-11-16) parser can ONLY process one scraper session
+at the time. It need to parse `/ts={timestamp}/` partition from given PREFIX to work
+correctly.
+
+In step functions output of scraper can be accessed like that:
+```
+"Overrides": {
+    "ContainerOverrides": [{
+        "Name": "justjoinit-scraper",
+        "Environment": [{
+            "Name": "PREFIX",
+            "Value.$": "$.output_prefix"
+        }]
+    }]
+}
+```
+
+
 ## Splash
 
 1. Run docker daemon:

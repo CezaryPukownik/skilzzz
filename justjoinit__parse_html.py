@@ -1,4 +1,5 @@
 #%%
+import os
 import click
 from dataclasses import dataclass
 from datetime import datetime
@@ -12,6 +13,7 @@ from scraper.session import Session
 from scraper.settings import S3_BUCKET, TIMESTAMP_FORMAT, JUSTJOINIT_JSONL_OFFERS_PATH 
 from scraper.storer import CompactedPartitionedS3DictStorer
 from scraper.logger import logger
+from scraper.flow import send_success
 from tqdm import tqdm
 
 from bs4 import BeautifulSoup
@@ -168,26 +170,36 @@ def main(prefix):
     if not (matches := re.findall("ts=([0-9]{14})", prefix)):
         raise ValueError("Provided prefix is not valid. Missing `ts` partition.")
 
+    # Get output json file name from given prefix.
     origin_session_ts = matches[0]
+    target_key = f"justjoinit-offers-{origin_session_ts}.jsonl"
+
     origin_session_date = datetime.strptime(origin_session_ts, TIMESTAMP_FORMAT).date()
-
-    context = JustjoinitJsonlContext(
-        prefix=prefix
-    )
-
-    s3_storer = CompactedPartitionedS3DictStorer(
-        bucket=S3_BUCKET, 
-        prefix=JUSTJOINIT_JSONL_OFFERS_PATH,
-        key=f"justjoinit-offers-{origin_session_ts}.jsonl", 
-        partitioner=YMDPartitioner(base_date=origin_session_date)
-    )
-
     session = JustjoinitJsonlSession(
         driver=S3Driver('skilzzz'),
-        storer=s3_storer
+        storer=CompactedPartitionedS3DictStorer(
+            bucket=S3_BUCKET, 
+            prefix=JUSTJOINIT_JSONL_OFFERS_PATH,
+            key=target_key, 
+            partitioner=YMDPartitioner(
+                base_date=origin_session_date
+            )
+        )
     )
 
-    session.start(context)
+    session.start(
+        JustjoinitJsonlContext(
+            prefix=prefix
+        )
+    )
+
+    # Get full output json path created by this task.
+    session_output_prefix = session.storer.prefix / session.storer.partitioner.get_partition() / target_key
+    if (task_token := os.environ.get('AWS_STEPFUNCTIONS_TASK_TOKEN', None)):
+        send_success(
+            task_token=task_token,
+            output=json.dumps({"output_prefix": session_output_prefix}, default=str)
+        )
 
 if __name__=="__main__":
     main()
