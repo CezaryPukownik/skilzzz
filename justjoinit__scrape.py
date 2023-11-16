@@ -165,7 +165,7 @@ if __name__ == "__main__":
             task_token=task_token,
             output=json.dumps({
                 "listing_prefix": session_listing_output_prefix,
-                "offers_prefix": session_output_prefix,
+                "offers_prefix": session_offers_output_prefix,
             }, default=str)
         )
 
