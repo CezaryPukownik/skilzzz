@@ -14,9 +14,6 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
 
-    - name: Install docker
-      uses: papodaca/install-docker-action@main 
-
     - name: Install AWS CLI
       uses: unfor19/install-aws-cli-action@v1
 
