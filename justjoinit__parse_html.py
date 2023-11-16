@@ -19,6 +19,12 @@ from tqdm import tqdm
 from bs4 import BeautifulSoup
 import re
 
+import traceback
+
+class InvalidHTMLDocument(Exception):
+    """When HTML cannot be parsed be parsing logic."""
+    pass
+
 class JustjoinitJsonlSession(Session):
 
     def generate_outputs(self, driver, context) -> Generator[Output, None, None]:
@@ -31,12 +37,11 @@ class JustjoinitJsonlSession(Session):
                 futures.append(executor.submit(self.generate_output, driver, file))
 
             for future in as_completed(futures):
-                try:
+                result = future.result()
+                if result:
                     yield future.result()
-                except ValueError as e:
-                    logger.error(f"Cannot parse file {file}. {e}")
                     
-
+                    
         # Linear execution
         # for file in files
         #     try:
@@ -46,17 +51,23 @@ class JustjoinitJsonlSession(Session):
             
 
     def generate_output(self, driver, file) -> DictOutput:
-        s3_object = driver.get(file)
-        html = s3_object.decode('utf-8')
-        logger.info(f"Loaded {file} from {driver.__class__.__name__}")
+        try:
+            s3_object = driver.get(file)
+            html = s3_object.decode('utf-8')
+            logger.info(f"Loaded {file} from {driver.__class__.__name__}")
 
-        html_data = self.parse_offer(html)
-        key_data = self.parse_key(file)
-        logger.info(f"File {file} parsed correctly")
+            html_data = self.parse_offer(html)
+            key_data = self.parse_key(file)
+            logger.info(f"File {file} parsed correctly")
 
-        return DictOutput(
-            content={**key_data, **html_data}
-        )
+            return DictOutput(
+                content={**key_data, **html_data}
+            )
+        except InvalidHTMLDocument as e:
+            logger.error(f"Cannot parse file {file} due to recognized invalid html. {e}")
+        except Exception as e:
+            traceback_str = "".join(traceback.format_tb(e.__traceback__))
+            logger.critical(f"Cannot parse file {file}. Unhandled exception:\n{e}\n{traceback_str}")
         
     def parse_key(self, key):
         data_from_key = re.findall("ts=([0-9]{14})/([0-9]{5})-(.*)\.html", key)
@@ -78,7 +89,7 @@ class JustjoinitJsonlSession(Session):
         # Title
         job_title = soup.select_one('h1')
         if job_title == None:
-            raise ValueError("Invalid HTML offer. Title cannot be found.")
+            raise InvalidHTMLDocument("Invalid HTML offer. Title cannot be found.")
 
         job_offer['title'] = job_title.text
 
@@ -102,6 +113,9 @@ class JustjoinitJsonlSession(Session):
             if has_h6 and has_h6.text.lower() == 'tech stack':
                 skills_section = section
                 break
+
+        if skills_section == None:
+            raise InvalidHTMLDocument("Invalid HTML offer. Skills (Tech Stack) section cannot be found.")
 
         job_skills = []
         for skill_h6 in skills_section.select_one('ul').find_all('h6'):

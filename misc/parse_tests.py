@@ -7,13 +7,17 @@ with open("/home/cezary/STXNext-Demos/skilzzz/data/justjoinit/offers/year=2023/m
 with open("/home/cezary/STXNext-Demos/skilzzz/data/justjoinit/offers/year=2023/month=11/day=14/ts=231114113334/00297-4it-solutions-programista-pl-sql.html") as f:
     html = f.read()
 
-
 # No salary range - just one value
 test3 = "/home/cezary/Pobrane/00022-natek-power-platform-developer.html"
 with open(test3) as f:
     html = f.read()
 
-soup = BeautifulSoup(html, 'html.parser')
+# Empty page (with no loaded content)
+with open("/home/cezary/STXNext-Demos/skilzzz/data/justjoinit/offers/00250-emagine-polska-io-bi-operational-manager.html") as f:
+   html = f.read()
+
+
+soup = BeautifulSoup(html, 'lxml')
 
 def clean_html_attributes(input_html: str) -> str:
     """
@@ -32,16 +36,24 @@ def clean_html_attributes(input_html: str) -> str:
 
 #%%
 
+print(soup.text)
+#%%
 job_offer = {}
 
-# Title
-job_title = soup.select_one('h1').text
-job_offer['title'] = job_title
 
+# Title
+job_title = soup.select_one('h1')
+if job_title == None:
+    raise InvalidHTMLDocument("Invalid HTML offer. Title cannot be found.")
+job_offer['title'] = job_title.text
+job_title
+#%%
 # Company
 job_company = soup.select_one('svg[data-testid="ApartmentRoundedIcon"]').parent.text
 job_offer['company'] = job_company
 
+job_company
+#%%
 # Location - City
 location_div = soup.select_one('svg[data-testid="PlaceOutlinedIcon"]').parent
 for span in location_div.find_all('span'):
@@ -58,6 +70,9 @@ for section in sections:
     if has_h6 and has_h6.text.lower() == 'tech stack':
         skills_section = section
         break
+
+if skills_section == None:
+    raise ValueError("Skills section not found in document.")
 
 job_skills = []
 for skill_h6 in skills_section.select_one('ul').find_all('h6'):
@@ -111,5 +126,4 @@ description_section = skills_section.next_sibling
 job_descripion = clean_html_attributes(str(description_section))
 job_offer['description'] = job_descripion
 job_offer
-# %%
 # %%
