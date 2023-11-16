@@ -27,5 +27,5 @@ jobs:
       run: docker tag skilzzz-justjoinit-scraper:latest 393861902470.dkr.ecr.eu-central-1.amazonaws.com/skilzzz-justjoinit-scraper:latest
 
     - name: Push Docker Image
-      run: docker push 393861902470.dkr.ecr.eu-central-1.amazonaws.com/skilzzz-justjoinit-scraper:latestu
+      run: docker push 393861902470.dkr.ecr.eu-central-1.amazonaws.com/skilzzz-justjoinit-scraper:latest
 
