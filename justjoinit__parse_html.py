@@ -7,14 +7,14 @@ from datetime import datetime
 from threading import Thread
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Generator
-from scraper.driver.s3 import S3Driver
+from scraper.producer.s3 import S3Producer
 from scraper.output import Output, DictOutput
 from scraper.partitioner import YMDPartitioner
 from scraper.session import Session
 from scraper.settings import S3_BUCKET, TIMESTAMP_FORMAT, JUSTJOINIT_JSONL_OFFERS_PATH 
-from scraper.storer import CompactedPartitionedS3DictStorer
+from scraper.storer import S3DictStorer
 from scraper.logger import logger
-from scraper.flow import send_success
+from scraper.stepfunctions import send_success
 from tqdm import tqdm
 
 from bs4 import BeautifulSoup
@@ -28,7 +28,7 @@ class InvalidHTMLDocument(Exception):
 
 class JustjoinitJsonlSession(Session):
 
-    def generate_outputs(self, driver, context) -> Generator[Output, None, None]:
+    def process(self, driver, context) -> Generator[Output, None, None]:
         files = driver.list_prefix(prefix=context.prefix)
 
         # Multithreaded execution
@@ -191,8 +191,8 @@ def main(prefix):
 
     origin_session_date = datetime.strptime(origin_session_ts, TIMESTAMP_FORMAT).date()
     session = JustjoinitJsonlSession(
-        driver=S3Driver('skilzzz'),
-        storer=CompactedPartitionedS3DictStorer(
+        producer=S3Producer('skilzzz'),
+        storer=S3DictStorer(
             bucket=S3_BUCKET, 
             prefix=JUSTJOINIT_JSONL_OFFERS_PATH,
             key=target_key, 

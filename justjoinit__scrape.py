@@ -1,171 +1,139 @@
 from dataclasses import dataclass
-from datetime import datetime
-import json
 from pathlib import Path
-import time
 from typing import Generator
-import os
-from threading import Thread
-from functools import partialmethod
-
-from bs4 import BeautifulSoup
+from urllib.parse import urljoin
 
 from scraper.logger import logger
 from scraper.output import FileOutput, Output
+from scraper.producer.base import HTMLResponse
 from scraper.session import Session
-from scraper.storer import FileSystemStorer, PartitionedFileSystemStorer, PartitionedS3FileStorer
+from scraper.storer import S3FileStorer
 from scraper.partitioner import YMDPartitioner
-from scraper.driver.chrome_selenium_remote import ChromeSeleniumRemoteDriver
+from scraper.producer.selenium import SeleniumProducer
+from scraper.stepfunctions import task
 
-# test
-from scraper.flow import send_success
-
-from scraper.settings import  (
-    SELENIUM_ADDRESS, 
+from scraper.settings import (
+    SELENIUM_ADDRESS,
     S3_BUCKET,
     JUSTJOINIT_HTML_LISTING_PATH,
     JUSTJOINIT_HTML_OFFERS_PATH,
     TIMESTAMP_FORMAT,
 )
 
+
 @dataclass(frozen=True)
-class JustjoinitContext:
+class JustjoinitSessionSettings:
     url: str
-    init_sleep: int
-    scroll_interval: int
+    init_wait: int
+    scroll_wait: int
     scroll_by: int
     session_timestamp: str
 
+
 class JustjoinitSession(Session):
-   
-    def generate_outputs(self, driver, context: JustjoinitContext) -> Generator[FileOutput, None, None]:
-        html = None
-        url = context.url
-        init_sleep = context.init_sleep
-        scroll_interval = context.scroll_interval
-        scroll_by = context.scroll_by
-        current_timestamp = context.session_timestamp
+    def listing_output(self, i: int, response: HTMLResponse):
+        partition = YMDPartitioner(date=self.metadata.started_at).get()
+        current_timestamp = self.metadata.started_at.strftime(TIMESTAMP_FORMAT)
+        filename = Path(f"justjoinit-listings-{current_timestamp}-{i:05}.html")
+        return FileOutput(
+            content=response.html,
+            filename=JUSTJOINIT_HTML_LISTING_PATH / partition / filename,
+        )
 
-        threads=[]
+    def process(
+        self, producer: SeleniumProducer, settings: JustjoinitSessionSettings
+    ) -> Generator[FileOutput, None, None]:
+        url = settings.url
+        init_wait = settings.init_wait
+        scroll_wait = settings.scroll_wait
+        scroll_by = settings.scroll_by
+
         followed_links = []
+        for i, response in enumerate(
+            producer.get_while_scrolling(
+                url, wait_time=init_wait, scroll_wait=scroll_wait, scroll_by=scroll_by
+            )
+        ):
+            # Save each response
+            yield self.listing_output(i, response)
 
-        logger.info(f"Openning url {url}...")
-        driver.get(url)
+            # parse every offer from response
+            offers = response.select("[data-index]")
+            for offer in offers:
+                follow_link = offer.select_one("a").get("href")
+                offer_index = int(offer.get("data-index"))
+                if follow_link not in followed_links:
+                    logger.info(
+                        f"Following offer {i}, data-index {offer_index}: {follow_link}"
+                    )
 
-        logger.info(f"Waiting for {init_sleep} seconds...")
-        time.sleep(init_sleep)
+                    # Spawn new session
+                    yield JustjoinitOfferPageSession(
+                        producer=SeleniumProducer(address=SELENIUM_ADDRESS),
+                        storer=S3FileStorer(bucket=S3_BUCKET),
+                        settings=JustjoinitOfferPageSessionSettings(
+                            url=urljoin("https://justjoin.it/", settings.follow_link),
+                            wait_time=1,
+                            offer_index=offer_index,
+                        ),
+                    )
 
-        logger.info("Started scrolling")
-        i = 0
-        while True:
-            driver.webdriver.execute_script(f"""window.scrollBy(0, {scroll_by})""")
-            time.sleep(scroll_interval) # seconds
-
-            # Get the current page height
-            javascript = """
-                const { scrollTop, scrollHeight, clientHeight } = document.documentElement;
-                return { scrollTop, scrollHeight, clientHeight };
-            """
-            scroll_props = driver.webdriver.execute_script(javascript)
-
-            # Access the retrieved scroll properties
-            scroll_top = scroll_props['scrollTop']
-            scroll_height = scroll_props['scrollHeight']
-            client_height = scroll_props['clientHeight']
-
-            # Check if the height has changed
-            if scroll_top+client_height >= scroll_height:
-                break
-
-            logger.info(f"Current position: {scroll_top+client_height}, Page size: {scroll_height}, Page index: {i}")
-
-            # Return rendered HTML if html was updated.
-            if html != driver.webdriver.page_source:
-                html = driver.webdriver.page_source
-
-                filename = Path(f"{current_timestamp}-{i:05}.html")
-                yield FileOutput(content=html, filename=filename)
-                i += 1
-            
-                # Parse each order as separate session. 
-                soup = BeautifulSoup(html, 'html.parser')
-                offers = soup.select("[data-index]")
-                for offer in offers:
-                    follow_link = offer.select_one('a').get('href')
-                    offer_index = int(offer.get('data-index'))
-                    if follow_link not in followed_links:
-                        logger.info(f"Following offer {i}, data-index {offer_index}: {follow_link}")
-
-                        # Spawn new session
-                        s3_storer = PartitionedS3FileStorer(
-                            bucket=S3_BUCKET, 
-                            prefix=JUSTJOINIT_HTML_OFFERS_PATH, 
-                            partitioner=YMDPartitioner(after={"ts": current_timestamp})
-                        )
-                        page_session = JustjoinitOfferPageSession(
-                            driver=ChromeSeleniumRemoteDriver(address=SELENIUM_ADDRESS),
-                            storer=s3_storer
-                        )
-                            
-                        page_context = JustjoinitOfferPageContext(follow_link=follow_link, offer_index=offer_index)
-                        thread = Thread(target=page_session.start, args=(page_context,))
-                        thread.start()
-
-                        # Remembed followed links to prevent from scraping duplicates.
-                        followed_links.append(follow_link)
-
-        logger.info("Got to the end of page.")
+                    # Remember followed links to prevent from scraping duplicates.
+                    followed_links.append(follow_link)
 
 
 @dataclass(frozen=True)
-class JustjoinitOfferPageContext:
-    follow_link: str
+class JustjoinitOfferPageSessionSettings:
+    url: str
+    wait_time: int
     offer_index: int
 
+
 class JustjoinitOfferPageSession(Session):
-    
-    def generate_outputs(self, driver, context: JustjoinitOfferPageContext) -> Generator[Output, None, None]:
-        base_url = "https://justjoin.it"
-        url = base_url + context.follow_link
-        offer_id = context.follow_link.split("/")[-1]
-        filename = f"{context.offer_index:05}-{offer_id}.html"
-        yield FileOutput(
-            content=driver.get(url),
-            filename=filename
+    def page_output(self, response) -> FileOutput:
+        timestamp = self.metadata.started_at.strftime(TIMESTAMP_FORMAT)
+        partition = YMDPartitioner(after={"ts": timestamp}).get()
+        offer_id = self.settings.utl.split("/")[-1]
+        filename = Path(f"{self.settings.offer_index:05}-{offer_id}.html")
+
+        return FileOutput(
+            content=response.html,
+            filename=JUSTJOINIT_HTML_OFFERS_PATH / partition / filename,
         )
+
+    def process(
+        self, producer: SeleniumProducer, settings: JustjoinitOfferPageSessionSettings
+    ) -> Generator[Output, None, None]:
+        response = producer.get(settings.url, wait_time=1)
+        yield self.page_output(response)
+
+
+@task
+def main():
+    session = JustjoinitSession(
+        producer=SeleniumProducer(address=SELENIUM_ADDRESS),
+        storer=S3FileStorer(bucket=S3_BUCKET),
+        settings=JustjoinitSessionSettings(
+            url="https://justjoin.it/all-locations/data",
+            init_wait=5,
+            scroll_by=100,
+            scroll_wait=0.2,
+        ),
+    )
+    session.start()
+
+    session_listing_output_prefix = (
+        JUSTJOINIT_HTML_LISTING_PATH / session.storer.partitioner.get_partition()
+    )
+    session_offers_output_prefix = (
+        JUSTJOINIT_HTML_OFFERS_PATH / session.storer.partitioner.get_partition()
+    )
+
+    return {
+        "listing_prefix": session_listing_output_prefix,
+        "offers_prefix": session_offers_output_prefix,
+    }
 
 
 if __name__ == "__main__":
-    url = "https://justjoin.it/all-locations/data"
-
-    session_timestamp = datetime.now().strftime(TIMESTAMP_FORMAT)
-    session = JustjoinitSession(
-        driver=ChromeSeleniumRemoteDriver(address=SELENIUM_ADDRESS),
-        storer=PartitionedS3FileStorer(
-            bucket=S3_BUCKET, 
-            prefix=JUSTJOINIT_HTML_LISTING_PATH, 
-            partitioner=YMDPartitioner(after={"ts": session_timestamp})
-        )
-    )
-
-    session.start(
-        JustjoinitContext(
-            url=url,
-            init_sleep=5, 
-            scroll_by=100,
-            scroll_interval=0.2,
-            session_timestamp=session_timestamp,
-        )
-    )
-    
-    session_listing_output_prefix = JUSTJOINIT_HTML_LISTING_PATH / session.storer.partitioner.get_partition()
-    session_offers_output_prefix = JUSTJOINIT_HTML_OFFERS_PATH / session.storer.partitioner.get_partition()
-    if (task_token := os.environ.get('AWS_STEPFUNCTIONS_TASK_TOKEN', None)):
-        send_success(
-            task_token=task_token,
-            output=json.dumps({
-                "listing_prefix": session_listing_output_prefix,
-                "offers_prefix": session_offers_output_prefix,
-            }, default=str)
-        )
-
+    main()

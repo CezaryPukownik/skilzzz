@@ -107,3 +107,7 @@ NEEDED ENV VARS:
 
 - TASK_TOKEN: Stepfunction Callback Task Token. Need to send output to another task.
 - SELENIUM_ADDRESS: (Optional, default="lokalhost:4444") Address to remote selenium server.
+
+
+# No fluff jobs
+1. Use Splash, vet veiwport and use PC useragent

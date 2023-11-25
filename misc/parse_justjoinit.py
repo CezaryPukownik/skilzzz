@@ -10,7 +10,6 @@ from pyspark.conf import SparkConf
 
 
 # Create a Spark session with your AWS Credentials
-
 conf = (
     SparkConf()
     .setAppName("MY_APP") # replace with your desired name
@@ -33,7 +32,7 @@ import pyspark.sql.functions as f
 from pyspark.sql.types import DecimalType, IntegerType, TimestampType
 import datetime
 
-df = spark.read.json("s3a://skilzzz/sources/justjoinit/offers/jsonl/year=2023/month=11/day=14/231114130114.jsonl")
+df = spark.read.json("s3a://skilzzz/sources/justjoinit/offers/jsonl/")
 
 cast_listed_at = f.udf(lambda x: datetime.datetime.strptime(x, '%y%m%d%H%M%S'), TimestampType())
 listing = df.select(
