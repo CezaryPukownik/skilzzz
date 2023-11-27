@@ -13,6 +13,7 @@ from scraper.producer.base import Producer, HTMLResponse
 class SeleniumProducer(Producer):
     def __init__(self, address, timeout=60):
         # Connect to remote selenum driver
+        logger.info(f"Connecting to selenium remote driver at {address}")
         options = webdriver.ChromeOptions()
         options.add_argument("--ignore-ssl-errors=yes")
         options.add_argument("--ignore-certificate-errors")
@@ -34,22 +35,23 @@ class SeleniumProducer(Producer):
                 "Connecting to remote selenium server timeout after {} seconds"
             )
 
-    def render_html(self):
-        return HTMLResponse(self.webdriver.page_source)
+    def _render_html(self):
+        return self.webdriver.page_source
 
     def get(self, url, wait_time: int = 0) -> HTMLResponse:
         self.webdriver.get(url)
         if wait_time:
             WebDriverWait(self.webdriver, wait_time)
 
-        return self.render_html()
+        return HTMLResponse(self._render_html())
 
-    def scroll_page(self, scroll_by, wait_time: int = 0) -> None:
+    def _scroll_page(self, scroll_by, wait_time: int = 0) -> None:
+        logger.info(f"Scrolled page by {scroll_by}, now waiting {wait_time} seconds.")
         self.webdriver.execute_script(f"window.scrollBy(0, {scroll_by})")
-        WebDriverWait(self.webdriver, wait_time)
-        return self.render_html()
+        self.webdriver.execute_script(f"await new Promise(r => setTimeout(r, {wait_time}000));")
+        return self._render_html()
 
-    def is_page_end(self):
+    def _is_page_end(self):
         # Get the current page height
         javascript = """
             const { scrollTop, scrollHeight, clientHeight } = document.documentElement;
@@ -63,27 +65,45 @@ class SeleniumProducer(Producer):
         client_height = scroll_props["clientHeight"]
 
         # Check if the height has changed
+        logger.debug("scroll_top: " + str(scroll_top))
+        logger.debug("scroll_height: " + str(scroll_height))
+        logger.debug("client_height: " + str(client_height))
+
         return scroll_top + client_height >= scroll_height
 
     def get_while_scrolling(
         self, url, wait_time, scroll_by, scroll_wait
     ) -> Generator[HTMLResponse, None, None]:
         # Initial page load and return html
-        rendered_html = self.get(url, wait_time=wait_time)
-        yield rendered_html
+        logger.info("Start scraping scroll down page.")
+        self.webdriver.get(url)
+        WebDriverWait(self.webdriver, wait_time)
+        rendered_html = self._render_html()
 
-        while not self.is_page_end():
-            rendered_html_after_scroll = self.scroll_page(scroll_by=scroll_by, wait_time=scroll_wait)
+        # Return page after initial load
+        yield HTMLResponse(rendered_html)
+        logger.info("Yielded response.")
+
+        # Scroll down to the end of page and return a page
+        # every time html changed.
+        while True:
+            rendered_html_after_scroll = self._scroll_page(scroll_by=scroll_by, wait_time=scroll_wait)
             if rendered_html_after_scroll != rendered_html:
                 rendered_html = rendered_html_after_scroll
-                yield rendered_html
+                yield HTMLResponse(rendered_html)
+                logger.info("Yielded response.")
+
+            if self._is_page_end():
+                logger.info("Got to the end of page.")
+                break
+
 
     def get_after_scroll(self, url, wait_time, scroll_by, scroll_wait) -> HTMLResponse:
         self.get(url, wait_time=wait_time)
-        while not self.is_page_end():
-            self.scroll_page(scroll_by=scroll_by, wait_time=scroll_wait)
+        while not self._is_page_end():
+            self._scroll_page(scroll_by=scroll_by, wait_time=scroll_wait)
         
-        return self.render_html()
+        return self._render_html()
 
-    def on_session_end(self, context):
+    def on_session_end(self):
         self.webdriver.quit()

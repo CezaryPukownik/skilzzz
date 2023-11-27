@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from datetime import date, datetime
+import datetime
 from pathlib import Path
 from typing import Optional, Dict
 
@@ -7,14 +7,14 @@ from typing import Optional, Dict
 class Partitioner(ABC):
     
     @abstractmethod
-    def get_partition(*args, **kwargs) -> Path:
+    def get(*args, **kwargs) -> Path:
         ...
 
         
 class YMDPartitioner(Partitioner):
 
     def __init__(
-        self, date: Optional[date]=None, before: Dict[str, str]={}, after: Dict[str, str]={}
+        self, date: Optional[datetime.date]=None, before: Dict[str, str]={}, after: Dict[str, str]={}
     ) -> None:
 
         self.date = date
@@ -22,7 +22,7 @@ class YMDPartitioner(Partitioner):
         self.after = after
 
         if not self.date:
-            self.date = date.today()
+            self.date = datetime.date.today()
         super().__init__()
 
 
@@ -37,3 +37,4 @@ class YMDPartitioner(Partitioner):
             partition = partition / Path(f"{key}={value}") 
 
         return partition
+    

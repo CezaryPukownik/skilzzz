@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from pathlib import Path
+from datetime import datetime
 from typing import Generator
 from urllib.parse import urljoin
 
@@ -27,7 +28,6 @@ class JustjoinitSessionSettings:
     init_wait: int
     scroll_wait: int
     scroll_by: int
-    session_timestamp: str
 
 
 class JustjoinitSession(Session):
@@ -36,7 +36,7 @@ class JustjoinitSession(Session):
         current_timestamp = self.metadata.started_at.strftime(TIMESTAMP_FORMAT)
         filename = Path(f"justjoinit-listings-{current_timestamp}-{i:05}.html")
         return FileOutput(
-            content=response.html,
+            content=response.html.prettify(),
             filename=JUSTJOINIT_HTML_LISTING_PATH / partition / filename,
         )
 
@@ -56,15 +56,18 @@ class JustjoinitSession(Session):
         ):
             # Save each response
             yield self.listing_output(i, response)
+            yield f"Offer list {i}"
 
             # parse every offer from response
             offers = response.select("[data-index]")
             for offer in offers:
-                follow_link = offer.select_one("a").get("href")
+                offer_link = offer.select_one("a").get("href")
+                follow_link = urljoin("https://justjoin.it/", offer_link)
+
                 offer_index = int(offer.get("data-index"))
                 if follow_link not in followed_links:
                     logger.info(
-                        f"Following offer {i}, data-index {offer_index}: {follow_link}"
+                        f"Rendered page: {i}, Offer data-index {offer_index}: {follow_link}"
                     )
 
                     # Spawn new session
@@ -72,14 +75,15 @@ class JustjoinitSession(Session):
                         producer=SeleniumProducer(address=SELENIUM_ADDRESS),
                         storer=S3FileStorer(bucket=S3_BUCKET),
                         settings=JustjoinitOfferPageSessionSettings(
-                            url=urljoin("https://justjoin.it/", settings.follow_link),
-                            wait_time=1,
+                            url=follow_link,
+                            wait_time=0,
                             offer_index=offer_index,
+                            session_ts=self.metadata.started_at
                         ),
                     )
 
-                    # Remember followed links to prevent from scraping duplicates.
-                    followed_links.append(follow_link)
+                # Remember followed links to prevent from scraping duplicates.
+                followed_links.append(follow_link)
 
 
 @dataclass(frozen=True)
@@ -87,17 +91,18 @@ class JustjoinitOfferPageSessionSettings:
     url: str
     wait_time: int
     offer_index: int
+    session_ts: datetime
 
 
 class JustjoinitOfferPageSession(Session):
     def page_output(self, response) -> FileOutput:
-        timestamp = self.metadata.started_at.strftime(TIMESTAMP_FORMAT)
+        timestamp = self.settings.session_ts.strftime(TIMESTAMP_FORMAT)
         partition = YMDPartitioner(after={"ts": timestamp}).get()
-        offer_id = self.settings.utl.split("/")[-1]
+        offer_id = self.settings.url.split("/")[-1]
         filename = Path(f"{self.settings.offer_index:05}-{offer_id}.html")
 
         return FileOutput(
-            content=response.html,
+            content=response.html.prettify(),
             filename=JUSTJOINIT_HTML_OFFERS_PATH / partition / filename,
         )
 
@@ -105,7 +110,8 @@ class JustjoinitOfferPageSession(Session):
         self, producer: SeleniumProducer, settings: JustjoinitOfferPageSessionSettings
     ) -> Generator[Output, None, None]:
         response = producer.get(settings.url, wait_time=1)
-        yield self.page_output(response)
+        yield self.settings.url
+        # yield self.page_output(response)
 
 
 @task
@@ -115,20 +121,17 @@ def main():
         storer=S3FileStorer(bucket=S3_BUCKET),
         settings=JustjoinitSessionSettings(
             url="https://justjoin.it/all-locations/data",
-            init_wait=5,
-            scroll_by=100,
-            scroll_wait=0.2,
+            init_wait=3,
+            scroll_by=500,
+            scroll_wait=1,
         ),
     )
     session.start()
 
-    session_listing_output_prefix = (
-        JUSTJOINIT_HTML_LISTING_PATH / session.storer.partitioner.get_partition()
-    )
-    session_offers_output_prefix = (
-        JUSTJOINIT_HTML_OFFERS_PATH / session.storer.partitioner.get_partition()
-    )
-
+    # Stepfunctions Task Output
+    partition = YMDPartitioner(date=session.metadata.started_at).get()
+    session_listing_output_prefix = JUSTJOINIT_HTML_LISTING_PATH / partition
+    session_offers_output_prefix = JUSTJOINIT_HTML_OFFERS_PATH / partition
     return {
         "listing_prefix": session_listing_output_prefix,
         "offers_prefix": session_offers_output_prefix,

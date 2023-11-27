@@ -22,7 +22,7 @@ def task(func):
             except Exception as e:
                 client.send_task_failure(
                     taskToken=task_token,
-                    error=str(e)
+                    error=str(e),
                     cause=str(traceback.format_exc())
                 )
         
