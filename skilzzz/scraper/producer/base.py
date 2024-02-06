@@ -1,27 +1,27 @@
 from abc import ABC, abstractmethod
 from bs4 import BeautifulSoup
-from scraper.output import Output
 
 
 class Response(ABC):
     ...
 
-class HTMLResponse(BeautifulSoup):
-    def __init__(self, html) -> None:
-        super().__init__(html, "lxml")
+
 
 class Producer(ABC):
     def on_session_end(self):
+        """This method is called by session when session ends"""
         ...
 
     def on_output_stored(self):
+        """This method is called by session when output was stored"""
         ...
 
     def on_session_fail(self):
+        """This method is called by session when session logic raises and error"""
         ...
 
     @abstractmethod
-    def get(url, *args, **kwargs) -> Response:
+    def get(*args, **kwargs) -> Response:
         ...
 
 

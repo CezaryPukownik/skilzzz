@@ -1,89 +1,109 @@
-import os
-import click
 import json
+import click
 
 from dataclasses import dataclass
 from datetime import datetime
-from threading import Thread
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Generator
-from scraper.producer.s3 import S3Producer
+from scraper.producer.storage import StorageProducer
 from scraper.output import Output, DictOutput
-from scraper.partitioner import YMDPartitioner
-from scraper.session import Session
-from scraper.settings import S3_BUCKET, TIMESTAMP_FORMAT, JUSTJOINIT_JSONL_OFFERS_PATH 
-from scraper.storer import S3DictStorer
+from scraper.session import Session, SessionMetadata
+from scraper.settings import TIMESTAMP_FORMAT
+from scraper.stepfunctions import stepfunctions_callback_handler
+from scraper.storer import AppendStorer
 from scraper.logger import logger
-from scraper.stepfunctions import send_success
-from tqdm import tqdm
+from parsers.exceptions import InvalidHTMLDocument
 
 from bs4 import BeautifulSoup
 import re
 
 import traceback
 
-class InvalidHTMLDocument(Exception):
-    """When HTML cannot be parsed be parsing logic."""
-    pass
 
-class JustjoinitJsonlSession(Session):
+class JustjoinitStorer(AppendStorer):
+    """
+    In this case we dont want to close file after ending session
+    because item will be yielded by child session. Files will be 
+    manually closed by main session.
+    """
+    def on_session_end(self):
+        pass
 
-    def process(self, driver, context) -> Generator[Output, None, None]:
-        files = driver.list_prefix(prefix=context.prefix)
 
-        # Multithreaded execution
-        futures = []
-        with ThreadPoolExecutor() as executor:
-            for file in files:
-                futures.append(executor.submit(self.generate_output, driver, file))
+@dataclass(frozen=True)
+class JustjoinitOffersFanoutSettings:
+    pattern: str
 
-            for future in as_completed(futures):
-                result = future.result()
-                if result:
-                    yield future.result()
-                    
-                    
-        # Linear execution
-        # for file in files
-        #     try:
-        #         yield self.generate_output(driver, file)
-        #     except ValueError:
-        #         logger.error(f"Cannot parse file {file}. Skipping...")
-            
+@dataclass(frozen=True)
+class JustjoinitOfferParserSettings:
+    file: str
 
-    def generate_output(self, driver, file) -> DictOutput:
+class JustjoinitOffersFanout(Session):
+    """
+    CAUTION: Always run at minimum whole session run! 
+    Running single html will most likely result in missing data.
+    """
+
+    def process(self) -> Generator[Output, None, None]:
+        files = self.producer.glob(pattern=self.settings.pattern)
+        for file in files:
+            logger.info(f"Created parsing session for file {file}")
+            yield JustjoinintOfferParser(
+                name=self.name,
+                collection=self.collection,
+                producer=self.producer,
+                storer=self.storer,
+                settings=JustjoinitOfferParserSettings(
+                    file=file
+                )
+            )
+        else:
+            logger.info(f"No files is given pattern {self.settings.pattern}")
+
+    def after_process(self):
+        # Mannualy closed all opened files after.
+        opened = [file for file, _ in self.storer.storage.opened.items()]
+        for file in opened:
+            self.storer.storage.close(file)
+
+class JustjoinintOfferParser(Session):
+                
+    def process(self) -> Generator[Output, None, None]:
         try:
-            s3_object = driver.get(file)
-            html = s3_object.decode('utf-8')
-            logger.info(f"Loaded {file} from {driver.__class__.__name__}")
+            # Getting ts from files session.
+            if not (match := re.findall("ts=([0-9]{14})/([0-9]{5})-(.*).html", self.settings.file)):
+                raise ValueError("Cannot parse ts from filepath corrently")
 
-            html_data = self.parse_offer(html)
-            key_data = self.parse_key(file)
-            logger.info(f"File {file} parsed correctly")
+            # Act as continuation of file processing session
+            session_ts, offer_index, offer_id = match[0]
+            session_dt = datetime.strptime(session_ts, TIMESTAMP_FORMAT)
+            self.metadata = SessionMetadata(
+                session_dt = session_dt,
+                session_ts = session_ts
+            ) 
+            
+            # Load html from filesystem
+            file_content = self.producer.get(self.settings.file)
+            logger.info(f"Loaded {self.settings.file} from {self.producer.__class__.__name__}")
 
-            return DictOutput(
-                content={**key_data, **html_data}
+            soup = BeautifulSoup(file_content, "lxml")
+            parsed_offer = self.parse_offer(soup)
+            yield DictOutput(
+                key=f"justjoinit-offers-{session_ts}.jsonl",
+                content={
+                    "listed_at": session_ts, 
+                    "offer_index": offer_index,
+                    "offer_id": offer_id,
+                    **parsed_offer
+                }
             )
         except InvalidHTMLDocument as e:
-            logger.error(f"Cannot parse file {file} due to recognized invalid html. {e}")
+            logger.error(f"Cannot parse file {self.settings.file} due to recognized invalid html. {e}")
         except Exception as e:
             traceback_str = "".join(traceback.format_tb(e.__traceback__))
-            logger.critical(f"Cannot parse file {file}. Unhandled exception:\n{e}\n{traceback_str}")
+            logger.critical(f"Cannot parse file {self.settings.file}. Unhandled exception:\n{e}\n{traceback_str}")
+                    
         
-    def parse_key(self, key):
-        data_from_key = re.findall("ts=([0-9]{14})/([0-9]{5})-(.*)\.html", key)
-        if data_from_key:
-            crawled_at, offer_index, offer_id = data_from_key[0]
-
-        return {
-            'listed_at': crawled_at,
-            'offer_index': offer_index,
-            'offer_id': offer_id
-        }
-
-
-    def parse_offer(self, html: str):
-        soup = BeautifulSoup(html, 'lxml')
+    def parse_offer(self, soup: BeautifulSoup):
 
         job_offer = {}
 
@@ -173,48 +193,24 @@ class JustjoinitJsonlSession(Session):
         return job_offer
 
 
-@dataclass(frozen=True)
-class JustjoinitJsonlContext:
-    """Prefix that will point to HTML Scraping Session."""
-    prefix: str
-
 @click.command()
-@click.option("--prefix")
-def main(prefix):
-    # prefix = "sources/justjoinit/offers/html/year=2023/month=11/day=14/ts=20231114185903/"
-    if not (matches := re.findall("ts=([0-9]{14})", prefix)):
-        raise ValueError("Provided prefix is not valid. Missing `ts` partition.")
-
-    # Get output json file name from given prefix.
-    origin_session_ts = matches[0]
-    target_key = f"justjoinit-offers-{origin_session_ts}.jsonl"
-
-    origin_session_date = datetime.strptime(origin_session_ts, TIMESTAMP_FORMAT).date()
-    session = JustjoinitJsonlSession(
-        producer=S3Producer('skilzzz'),
-        storer=S3DictStorer(
-            bucket=S3_BUCKET, 
-            prefix=JUSTJOINIT_JSONL_OFFERS_PATH,
-            key=target_key, 
-            partitioner=YMDPartitioner(
-                base_date=origin_session_date
-            )
+@click.option("--pattern")
+@click.option("--read", default='fs')
+@click.option("--write", default='fs')
+@stepfunctions_callback_handler
+def main(pattern, read, write):
+    assets = JustjoinitOffersFanout(
+        name="justjoinit",
+        collection="offers",
+        producer=StorageProducer(storage=read),
+        storer=JustjoinitStorer(storage=write),
+        settings=JustjoinitOffersFanoutSettings(
+            pattern=pattern
         )
-    )
+    ).start()
 
-    session.start(
-        JustjoinitJsonlContext(
-            prefix=prefix
-        )
-    )
-
-    # Get full output json path created by this task.
-    session_output_prefix = session.storer.prefix / session.storer.partitioner.get_partition() / target_key
-    if (task_token := os.environ.get('AWS_STEPFUNCTIONS_TASK_TOKEN', None)):
-        send_success(
-            task_token=task_token,
-            output=json.dumps({"output_prefix": session_output_prefix}, default=str)
-        )
+    logger.info("Session output:\n" + json.dumps(assets, indent=4))
+    return assets
 
 if __name__=="__main__":
     main()

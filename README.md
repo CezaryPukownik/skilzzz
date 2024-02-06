@@ -70,11 +70,14 @@ $ sudo docker run -it -p 8050:8050 --rm scrapinghub/splash --disable-private-mod
 ```
 
 
-Use selenium standalone application
+## Use selenium standalone application
 https://www.browserstack.com/guide/run-selenium-tests-in-docker
 
 docker pull selenium/standalone-chrome
 docker run -d -p 4444:4444 -v /dev/shm:/dev/shm selenium/standalone-chrome
+sudo docker run -d -e SE_NODE_MAX_SESSIONS=5 -p 4444:4444 -v /dev/shm:/dev/shm selenium/standalone-chrome
+
+password fot vnc (live preview): "secret"
 
 ## build
 

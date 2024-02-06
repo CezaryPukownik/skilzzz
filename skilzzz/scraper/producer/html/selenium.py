@@ -7,16 +7,20 @@ from selenium.webdriver.support.ui import WebDriverWait
 
 from scraper.logger import logger
 
-from scraper.producer.base import Producer, HTMLResponse
+from scraper.producer.html.html import HTMLProducer, HTMLResponse
 
 
-class SeleniumProducer(Producer):
-    def __init__(self, address, timeout=60):
+class SeleniumProducer(HTMLProducer):
+    def __init__(self, address, timeout=60, custom_ua=None):
         # Connect to remote selenum driver
         logger.info(f"Connecting to selenium remote driver at {address}")
         options = webdriver.ChromeOptions()
         options.add_argument("--ignore-ssl-errors=yes")
         options.add_argument("--ignore-certificate-errors")
+
+        if custom_ua:
+            options.add_argument(f"user-agent={custom_ua}")
+
 
         for _ in range(timeout):
             try:
@@ -106,4 +110,9 @@ class SeleniumProducer(Producer):
         return self._render_html()
 
     def on_session_end(self):
+        logger.info("Scraping session ended. Closing webdriver.")
+        self.webdriver.quit()
+
+    def on_session_fail(self):
+        logger.error("Scraping session failed. Closing webdriver.")
         self.webdriver.quit()

@@ -5,7 +5,8 @@ import traceback
       
 from scraper.logger import logger
  
-def task(func):
+def stepfunctions_callback_handler(func):
+    """A wrapper for communicating with AWS Stepfunctions about output and state."""
     
     def inner(*args, **kwargs):
         if (task_token := os.environ.get('AWS_STEPFUNCTIONS_TASK_TOKEN', None)):
