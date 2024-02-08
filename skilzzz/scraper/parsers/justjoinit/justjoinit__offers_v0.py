@@ -1,3 +1,4 @@
+import re
 
 from bs4 import BeautifulSoup
 
@@ -94,3 +95,4 @@ def parse_offer(soup: BeautifulSoup):
     job_offer['description'] = job_descripion
 
     return job_offer
+
