@@ -5,7 +5,7 @@ ADD requirements.txt .
 
 RUN pip install -r requirements.txt
 
-ENTRYPOINT ["python", "skilzzz/justjoinit__parse.py"]
+ENTRYPOINT ["python", "skilzzz/justjoinit__parser.py"]
 CMD ["--help"]
 
 ENV PYTHONUNBUFFERED=1

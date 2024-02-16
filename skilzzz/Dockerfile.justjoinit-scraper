@@ -5,7 +5,7 @@ ADD requirements.txt .
 
 RUN pip install -r requirements.txt
 
-ENTRYPOINT ["python", "skilzzz/justjoinit__scrape.py"]
+ENTRYPOINT ["python", "skilzzz/justjoinit__scraper.py"]
 CMD ["--help"]
 
 ENV PYTHONUNBUFFERED=1
