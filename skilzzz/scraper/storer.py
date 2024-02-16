@@ -4,13 +4,14 @@ from typing import Literal
 from scraper.partitioner import YMDTSPartitioner
 
 from scraper.output import Output 
-from scraper.storage import Storage, create_storage
+from scraper.storage import BaseStorage, Storage
 
 
 class Storer(ABC):
     """Responsible for implementing strategies of storing output"""
     def __init__(self, storage: Literal['fs', 's3']):
-        self.storage: Storage = create_storage(storage)
+        self.storage_type = storage
+        self.storage: BaseStorage = Storage(storage=storage)
 
     @abstractmethod
     def store(self, output: Output) -> Path:

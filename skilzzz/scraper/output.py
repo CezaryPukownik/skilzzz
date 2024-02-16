@@ -4,6 +4,7 @@ import json
 from typing import Any, Dict
 
 from scraper.producer.html.html import HTMLResponse
+from scraper import logger
 
 
 class Output(ABC):
@@ -20,6 +21,7 @@ class Output(ABC):
     @property
     @abstractmethod
     def format(self):
+        """Used to generate file key"""
         ...
 
 
@@ -41,5 +43,8 @@ class HTMLOutput(Output):
         super().__init__(key, content)
 
     def serialize(self) -> bytes:
-        html_string = self.content.html.prettify()
+        try:
+            html_string = self.content.html.prettify()
+        except AttributeError as e:
+            logger.warning("")
         return str.encode(html_string)

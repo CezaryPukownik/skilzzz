@@ -69,7 +69,7 @@ class JustjoinitOffersScraper(Session):
                         name='justjoinit',
                         collection='offers',
                         producer=SeleniumProducer(address=SELENIUM_ADDRESS),
-                        storer=OverwriteStorer(storage='fs'),
+                        storer=OverwriteStorer(storage=self.storer.storage_type),
                         settings=JustjoinitOfferPageScraperSettings(
                             url=follow_link,
                             offer_index=offer_index,
@@ -89,28 +89,33 @@ class JustjoinitOfferPageScraper(Session):
     def process(self) -> Generator[Output, None, None]:
         response = self.producer.get(self.settings.url, wait_time=1)
         offer_id = self.settings.url.split("/")[-1]
-        yield HTMLOutput(
-            key=f"{self.settings.offer_index:05}-{offer_id}.html",
-            content=response,
-        )
+        
+        if response:
+            yield HTMLOutput(
+                key=f"{self.settings.offer_index:05}-{offer_id}.html",
+                content=response,
+            )
 
 @click.command()
+@click.option("--storage", default="s3", type=str, help="Target storage of scraping task. One of {'fs', 's3'}")
 @click.option("--init-wait", default=3, type=int, help="Seconds await until page loads")
 @click.option("--scroll-wait", default=1, type=int, help="Seconds wait after scrolling down")
 @click.option("--scroll-by", default=500, type=int, help="Pixels of each scroll down action")
+@click.option("--test-run", is_flag=True, default=False, help="Run only first 10 outputs.")
 @stepfunctions_callback_handler
-def main(init_wait, scroll_wait, scroll_by):
+def main(storage, init_wait, scroll_wait, scroll_by, test_run):
     assets = JustjoinitOffersScraper(
         name='justjoinit',
         collection='offerlist',
         producer=SeleniumProducer(address=SELENIUM_ADDRESS),
-        storer=OverwriteStorer(storage='fs'),
+        storer=OverwriteStorer(storage=storage),
         settings=JustjoinitOffersScraperSettings(
             url="https://justjoin.it/all-locations/data",
-            init_wait=3,
-            scroll_wait=3,
-            scroll_by=500,
+            init_wait=init_wait,
+            scroll_wait=scroll_wait,
+            scroll_by=scroll_by,
         ),
+        is_test=test_run
     ).start()
 
     logger.info("Session output:\n" + json.dumps(assets, indent=4))

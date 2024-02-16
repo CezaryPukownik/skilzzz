@@ -31,7 +31,7 @@ class SeleniumProducer(HTMLProducer):
                 break
             except:
                 logger.warning(
-                    "Unable to connecto to remote driver, retring in 1 second."
+                    "Unable to connect to remote driver, retring in 1 second."
                 )
                 time.sleep(1)
         else:

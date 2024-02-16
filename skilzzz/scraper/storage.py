@@ -10,7 +10,7 @@ from scraper.logger import logger
 from scraper.settings import S3_BUCKET
 
 # IDEA: Make this context manager compatible?
-class Storage(ABC):
+class BaseStorage(ABC):
     """Responsible for handling I/O with storage type"""
     def __init__(self) -> None:
         self.opened = {}
@@ -36,7 +36,7 @@ class Storage(ABC):
         ...
 
 
-class FileSystemStorage(Storage):
+class FileSystemStorage(BaseStorage):
 
     def open(self, file: Path):
         file.parent.mkdir(parents=True, exist_ok=True)
@@ -60,7 +60,7 @@ class FileSystemStorage(Storage):
         super().close(file)
 
 
-class S3Storage(Storage):
+class S3Storage(BaseStorage):
     def __init__(self, bucket) -> None:
         self.s3 = boto3.client("s3")
         self.bucket = bucket
@@ -71,7 +71,7 @@ class S3Storage(Storage):
         super().open(file)
 
     def load(self, file: Path):
-        s3_object = self.s3.get_object(Bucket=self.bucket, Key=file)
+        s3_object = self.s3.get_object(Bucket=self.bucket, Key=str(file))
         content = s3_object["Body"].read().decode('utf-8')
         super().load(file)
         return content
@@ -81,15 +81,31 @@ class S3Storage(Storage):
         super().write(file, content)
 
     def close(self, file: Path):
-        self.s3.upload_file(self.opened[file].name, self.bucket, file)
+        self.s3.upload_file(self.opened[file].name, self.bucket, str(file))
         self.opened[file].close()
         del self.opened[file]
         super().close(file)
 
-def create_storage(type: Literal['fs', 's3']):
-    if type=="fs":
-        return FileSystemStorage()
-
-    elif type=="s3":
-        return S3Storage(bucket=S3_BUCKET)
         
+class Storage(BaseStorage):
+    def __init__(self, storage: Literal['fs', 's3']) -> None:
+        if storage == "fs":
+            self.storage = FileSystemStorage()
+        elif storage == "s3":
+            self.storage = S3Storage(bucket=S3_BUCKET)
+        else:
+            raise ValueError(f"Unsupported storeage type {storage}.")
+
+        self.opened = self.storage.opened
+
+    def open(self, file: Path) -> None:
+        return self.storage.open(file)
+
+    def load(self, file: Path) -> str:
+        return self.storage.load(file)
+
+    def write(self, file: Path, content: bytes) -> None:
+        return self.storage.write(file, content)
+
+    def close(self, file: Path) -> None:
+        return self.storage.close(file)

@@ -1,0 +1,11 @@
+FROM python:3.10
+
+ADD skilzzz skilzzz
+ADD requirements.txt .
+
+RUN pip install -r requirements.txt
+
+ENTRYPOINT ["python", "skilzzz/justjoinit__scrape.py"]
+CMD ["--help"]
+
+ENV PYTHONUNBUFFERED=1

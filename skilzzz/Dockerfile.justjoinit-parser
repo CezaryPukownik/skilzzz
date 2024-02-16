@@ -1,9 +1,0 @@
-FROM python:3.10
-
-ADD scraper scraper 
-ADD brokers/justjoinit/justjoinit__parse_html.py .
-ADD requirements.txt .
-
-RUN pip install -r requirements.txt
-
-CMD python brokers/justjoinit/justjoinit__parse_html.py --prefix $PREFIX

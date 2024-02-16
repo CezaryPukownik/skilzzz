@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 import json
 import re
 from typing import Dict, Generator, Set, List
+from itertools import takewhile
 
 from functools import partial
 
@@ -20,15 +21,14 @@ class SessionMetadata:
     session_ts: datetime
 
 class Session(ABC):
-    def __init__(self, name: str, collection: str, producer, storer, settings):
+    def __init__(self, name: str, collection: str, producer, storer, settings, is_test=False):
         self.name = name
         self.collection = collection
         self.producer = producer
         self.storer = storer
         self.settings = settings
+        self.is_test = is_test
         self.metadata = self.create_metadata()
-
-        # storer.register_session(self)
 
     def start(self) -> None:
         try:
@@ -36,7 +36,13 @@ class Session(ABC):
                 # signal can be Output or Session
                 futures = []
                 assets = defaultdict(set)
-                for signal in self.process():
+                for i, signal in enumerate(self.process()):
+
+                    # Test run, only first 10 outputs.
+                    if i >= 10 and self.is_test:
+                        logger.info("Ended session after 5 outputs.")
+                        break
+                    
                     # Store if session yielded Output
                     if isinstance(signal, Output):
                         output = signal

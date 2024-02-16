@@ -4,7 +4,7 @@ import os
 TIMESTAMP_FORMAT = "%Y%m%d%H%M%S"
 MULTITHREAD_WORKERS = 8
 # Selenium
-SELENIUM_ADDRESS = os.environ.get('SELENIUM_ADDRESS') or 'localhost:4444'
+SELENIUM_ADDRESS = os.environ.get('SELENIUM_ADDRESS') or '0.0.0.0:4444'
 
 # AWS S3
 S3_BUCKET = "skilzzz"

@@ -110,8 +110,8 @@ class JustjoinintOfferParser(Session):
         
 @click.command()
 @click.option("--pattern")
-@click.option("--read", default='fs')
-@click.option("--write", default='fs')
+@click.option("--read", default='s3')
+@click.option("--write", default='s3')
 @stepfunctions_callback_handler
 def main(pattern, read, write):
     assets = JustjoinitOffersFanout(

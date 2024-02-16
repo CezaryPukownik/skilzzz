@@ -87,14 +87,14 @@ aws ecr get-login-password --region eu-central-1 | sudo docker login --username 
 
 ### build justjoinit scraper
 
-sudo docker build -t skilzzz-justjoinit-scraper -f Dockerfile.justjoinit-scraper .
+sudo docker build -t skilzzz-justjoinit-scraper -f skilzzz/Dockerfile.justjoinit-scrape .
 sudo docker tag skilzzz-justjoinit-scraper:latest 393861902470.dkr.ecr.eu-central-1.amazonaws.com/skilzzz-justjoinit-scraper:latest
 docker push 393861902470.dkr.ecr.eu-central-1.amazonaws.com/skilzzz-justjoinit-scraper:latestu
 
 
 ### build justjoinit parser
 
-sudo docker build -t skilzzz-justjoinit-parser -f Dockerfile.justjoinit-parser .
+sudo docker build -t skilzzz-justjoinit-parse -f skilzzz/Dockerfile.justjoinit-parse .
 sudo docker tag skilzzz-justjoinit-parser:latest 393861902470.dkr.ecr.eu-central-1.amazonaws.com/skilzzz-justjoinit-parser:latest
 sudo docker push 393861902470.dkr.ecr.eu-central-1.amazonaws.com/skilzzz-justjoinit-parser:latest
 
@@ -109,7 +109,7 @@ To run locally:
 NEEDED ENV VARS:
 
 - TASK_TOKEN: Stepfunction Callback Task Token. Need to send output to another task.
-- SELENIUM_ADDRESS: (Optional, default="lokalhost:4444") Address to remote selenium server.
+- SELENIUM_ADDRESS: (Optional, default="localhost:4444") Address to remote selenium server.
 
 
 # No fluff jobs
